@@ -1,0 +1,27 @@
+{
+
+    "_id": "1",
+    "_rev": "",
+    "post_name": "Shooting horreur",
+    "post_content": "série de photo halloween 2024 ",
+    "attributes": {
+      "creation_date": "today",
+      "author": "Doriane"
+    },
+    "comments": [
+      {
+        "comment": "Holala on pourrait presque croire que c'est réel ! ",
+        "author": "Anna"
+      },
+      {
+        "comment": "Pfff j'aurai fait mieux...",
+        "author": "Christel"
+      },
+      {
+        "comment": "Pourquoi ne pas mettre un petit chat tout mignon à la place du squelette",
+        "author": "Inconnu"
+      }
+    ]
+  }
+  
+   
