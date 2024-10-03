@@ -1,5 +1,6 @@
-<script lang="ts">
 
+<script lang="ts">
+import PouchDB from 'pouchdb';
 export default {
   data() {
     return {
@@ -13,6 +14,8 @@ export default {
       // this.total++;
     },
     initDatabase() {
+      const db = new PouchDB('http://localhost:5984/commentaires-database');
+      console.log(db);
     },
     fetchData() {
     }
