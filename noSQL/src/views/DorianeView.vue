@@ -27,6 +27,7 @@ export default {
     return {
       postsData: [] as Post[], // Tableau pour stocker les données des posts
       storage: null as PouchDB.Database | null, // Référence à la base de données PouchDB
+      remoteDB: null as PouchDB.Database | null, // Référence à la base de données distante
       isEditing: false, // État pour déterminer si le formulaire est en mode édition
       isAdding: false, // État pour déterminer si le formulaire est en mode ajout
       addForm: { // Formulaire pour ajouter un nouveau post
@@ -54,13 +55,16 @@ export default {
   mounted() {
     this.initDatabase(); // Initialisation de la base de données
     this.fetchData(); // Récupération des données des posts existants
+    this.startSync(); // Démarrer la synchronisation
   },
 
   methods: {
     // Méthode pour initialiser la base de données PouchDB
     initDatabase() {
-      const db = new PouchDB('http://localhost:5984/commentaires-database'); // Créer une nouvelle instance de PouchDB
-      this.storage = db; // Stocker la référence de la base de données
+      const db = new PouchDB('local-commentaires'); // Base de données locale
+      const remoteDb = new PouchDB('http://localhost:5984/commentaires-database'); // Base de données distante
+      this.storage = db;
+      this.remoteDB = remoteDb;
     },
 
     // Méthode pour récupérer les données des posts dans la base de données
@@ -85,6 +89,21 @@ export default {
           }));
         }).catch((error: any) => {
           console.log('fetchData error', error); // Gérer les erreurs
+        });
+      }
+    },
+
+    startSync() {
+      if (this.storage && this.remoteDB) {
+        // Synchroniser la base de données locale et distante
+        const sync = PouchDB.sync(this.storage, this.remoteDB, {
+          live: true, // Synchronisation en temps réel
+          retry: true // Réessayer en cas de déconnexion
+        }).on('change', (info) => {
+          console.log('Changement détecté', info);
+          this.fetchData(); // Mettre à jour les données locales à chaque changement
+        }).on('error', (err) => {
+          console.error('Erreur de synchronisation', err);
         });
       }
     },
@@ -118,6 +137,7 @@ export default {
         db.put(document).then(() => {
           console.log('Add ok'); // Log pour succès
           this.fetchData(); // Rafraîchir les données après l'ajout
+        // La synchronisation gère automatiquement les mises à jour de la base de données distante
         }).catch((error) => {
           console.log('Add ko', error); // Gérer les erreurs
         });
