@@ -185,6 +185,7 @@ export default {
     deleteDocument(post: Post) {
       const db = ref(this.storage).value; // Récupérer la référence de la base de données
       if (db && post._id && post._rev) { // Vérifier que le post a un ID et une révision
+        console.log('Deleting document:', post); // Log pour afficher le document qui sera supprimé
         db.remove(post._id, post._rev).then(() => {
           console.log('Delete ok'); // Log pour succès
           this.fetchData(); // Rafraîchir les données après la suppression
@@ -211,8 +212,11 @@ export default {
           },
           comments: this.editForm.comments // Utiliser les commentaires du formulaire
         };
+
+        console.log('Saving document:', updatedDoc); // Log pour afficher le document qui sera enregistré
         
         db.put(updatedDoc).then(() => {
+          console.log('Update ok', updatedDoc); // Log pour succès avec le document mis à jour
           this.fetchData(); // Rafraîchir les données après la mise à jour
           this.cancelEdit(); // Réinitialiser le formulaire d'édition
         }).catch((error) => {
