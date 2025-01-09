@@ -1,234 +1,303 @@
 <script lang="ts">
-import { ref } from 'vue'; // Importation de la fonction ref de Vue pour créer des références réactives
-import PouchDB from 'pouchdb'; // Importation de PouchDB pour la gestion de la base de données
+import { ref } from 'vue';
+import PouchDB from 'pouchdb';
 
-// Déclaration de l'interface pour un commentaire
+// Interfaces existantes
 declare interface Comment {
-  comment: string; // Contenu du commentaire
-  author: string; // Auteur du commentaire
+  comment: string;
+  author: string;
 }
 
-// Déclaration de l'interface pour un post
 declare interface Post {
-  _id: string; // Identifiant unique 
-  _rev?: string; // Révision du post (utilisé pour le versioning dans PouchDB)
-  post_name: string; // Nom du post
-  post_content: string; // Contenu du post
-  attributes: { // Attributs supplémentaires du post
-    creation_date: string; // Date de création du post
-    author: string; // Auteur du post
+  _id: string;
+  _rev?: string;
+  post_name: string;
+  post_content: string;
+  attributes: {
+    creation_date: string;
+    author: string;
   },
-  comments: Comment[]; // Tableau de commentaires associés au post
+  comments: Comment[];
 }
 
 export default {
-  // Déclaration des données de composant
   data() {
     return {
-      postsData: [] as Post[], // Tableau pour stocker les données des posts
-      storage: null as PouchDB.Database | null, // Référence à la base de données PouchDB
-      remoteDB: null as PouchDB.Database | null, // Référence à la base de données distante
-      isEditing: false, // État pour déterminer si le formulaire est en mode édition
-      isAdding: false, // État pour déterminer si le formulaire est en mode ajout
-      addForm: { // Formulaire pour ajouter un nouveau post
-        post_name: '', // Nom du post
-        post_content: '', // Contenu du post
-        attributes: { // Attributs supplémentaires pour le post
-          author: '' // Auteur du post
+      remoteDB: 'http://Dory:Admin13@localhost:5984/commentaires-database',
+      postsData: [] as Post[],
+      storage: null as PouchDB.Database | null,
+      changes: null as any,
+      isEditing: false,
+      isAdding: false,
+      previewPostId: null as string | null,
+      addForm: {
+        post_name: '',
+        post_content: '',
+        attributes: {
+          author: ''
         },
-        comments: [] as Comment[] // Tableau pour stocker les commentaires
+        comments: [] as Comment[]
       },
-      editForm: { // Formulaire pour modifier un post existant
-        post_name: '', // Nom du post
-        post_content: '', // Contenu du post
-        _id: '', // Identifiant du post
-        _rev: '', // Révision du post
-        attributes: { // Attributs supplémentaires pour le post
-          author: '' // Auteur du post
+      editForm: {
+        post_name: '',
+        post_content: '',
+        _id: '',
+        _rev: '',
+        attributes: {
+          author: ''
         },
-        comments: [] as Comment[] // Tableau pour stocker les commentaires
+        comments: [] as Comment[]
       }
     };
   },
 
-  // Méthode exécutée lorsque le composant est monté
   mounted() {
-    this.initDatabase(); // Initialisation de la base de données
-    this.fetchData(); // Récupération des données des posts existants
-    this.startSync(); // Démarrer la synchronisation
+    this.initDatabase();
+    this.fetchData();
+    this.watchRemoteDatabase();
+  },
+
+  beforeUnmount() {
+    if (this.changes) {
+      this.changes.cancel();
+    }
   },
 
   methods: {
-    // Méthode pour initialiser la base de données PouchDB
+    // Initialisation de la base de données
     initDatabase() {
-      const db = new PouchDB('local-commentaires'); // Base de données locale
-      const remoteDb = new PouchDB('http://localhost:5984/commentaires-database'); // Base de données distante
-      this.storage = db;
-      this.remoteDB = remoteDb;
+      const localDB = 'local-commentaires';
+      const $db = new PouchDB(localDB);
+      if ($db) {
+        console.log('Connected to collection: ' + $db.name);
+      } else {
+        console.warn('Something went wrong');
+      }
+      this.storage = $db;
     },
 
-    // Méthode pour récupérer les données des posts dans la base de données
+    // Récupération des données
     fetchData() {
-      const storage = ref(this.storage); // Créer une référence réactive à la base de données
-      if (storage.value) { // Vérifier si la base de données est initialisée
-        storage.value.allDocs({
-          include_docs: true, // Inclure les documents dans le résultat
-          attachments: true // Inclure les pièces jointes
+      const db = ref(this.storage).value;
+      if (db) {
+        db.allDocs({
+          include_docs: true,
+          attachments: true
         }).then((result: any) => {
-          // Mapper les résultats pour les stocker dans postsData
+          console.log('fetchData success =>', result.rows);
           this.postsData = result.rows.map((row: any) => ({
-            _id: row.id, // Identifier le post
-            _rev: row.doc._rev, // Révision du post
-            post_name: row.doc.post_name, // Nom du post
-            post_content: row.doc.post_content, // Contenu du post
+            _id: row.id,
+            _rev: row.doc._rev,
+            post_name: row.doc.post_name,
+            post_content: row.doc.post_content,
             attributes: {
-              creation_date: row.doc.attributes?.creation_date || '', // Date de création
-              author: row.doc.attributes?.author || '' // Auteur
+              creation_date: row.doc.attributes?.creation_date || '',
+              author: row.doc.attributes?.author || ''
             },
-            comments: row.doc.comments || [] // Commentaires
+            comments: row.doc.comments || []
           }));
         }).catch((error: any) => {
-          console.log('fetchData error', error); // Gérer les erreurs
+          console.log('fetchData error', error);
         });
       }
     },
 
-    startSync() {
-      if (this.storage && this.remoteDB) {
-        // Synchroniser la base de données locale et distante
-        const sync = PouchDB.sync(this.storage, this.remoteDB, {
-          live: true, // Synchronisation en temps réel
-          retry: true // Réessayer en cas de déconnexion
-        }).on('change', (info) => {
-          console.log('Changement détecté', info);
-          this.fetchData(); // Mettre à jour les données locales à chaque changement
-        }).on('error', (err) => {
-          console.error('Erreur de synchronisation', err);
+    // Méthodes de synchronisation
+    updateLocalDatabase() {
+      const db = ref(this.storage).value;
+      if (db) {
+        db.replicate.from(this.remoteDB)
+          .on('complete', () => {
+            console.log('on replicate complete');
+            this.fetchData();
+          })
+          .on('error', function (error) {
+            console.log('error', error);
+          });
+      }
+    },
+
+    updateDistantDatabase() {
+      const db = ref(this.storage).value;
+      if (db) {
+        db.replicate.to(this.remoteDB)
+          .on('complete', () => {
+            console.log('Synchronisation avec la base distante terminée');
+          })
+          .on('error', (error) => {
+            console.log('Erreur lors de la synchronisation:', error);
+          });
+      }
+    },
+
+    watchRemoteDatabase() {
+      const db = ref(this.storage).value;
+      if (db) {
+        this.changes = db.changes({
+          since: 'now',
+          live: true,
+          include_docs: true
+        })
+        .on('change', (change) => {
+          console.log('Changement détecté:', change);
+          this.fetchData();
+        })
+        .on('error', (error) => {
+          console.log('Erreur de watch:', error);
         });
       }
     },
 
-    // Méthode pour démarrer l'ajout d'un nouveau post
+    //méthode pour la synchronisation bidirectionnelle
+    async syncBothDatabases() {
+      const db = ref(this.storage).value;
+      if (db) {
+        try {
+          // Synchronisation depuis le serveur vers local
+          await db.replicate.from(this.remoteDB)
+            .on('complete', () => {
+              console.log('Synchronisation depuis le serveur terminée');
+            })
+            .on('error', (error) => {
+              console.log('Erreur lors de la synchronisation depuis le serveur:', error);
+            });
+
+          // Synchronisation depuis local vers le serveur
+          await db.replicate.to(this.remoteDB)
+            .on('complete', () => {
+              console.log('Synchronisation vers le serveur terminée');
+            })
+            .on('error', (error) => {
+              console.log('Erreur lors de la synchronisation vers le serveur:', error);
+            });
+
+          // Actualiser les données après la synchronisation complète
+          this.fetchData();
+          console.log('Synchronisation bidirectionnelle terminée');
+        } catch (error) {
+          console.log('Erreur lors de la synchronisation bidirectionnelle:', error);
+        }
+      }
+    },
+
+    // Méthodes CRUD
     startAdd() {
-      this.isAdding = true; // Afficher le formulaire d'ajout
-      this.isEditing = false; // Assurez-vous que le formulaire d'édition est masqué
+      this.isAdding = true;
+      this.isEditing = false;
     },
- 
-    // Méthode pour ajouter un nouveau document
+
     addDocument() {
       const newDoc: Post = {
-        _id: new Date().toISOString(), // Générer un nouvel ID basé sur la date
-        post_name: this.addForm.post_name, // Utiliser le nom du post du formulaire
-        post_content: this.addForm.post_content, // Utiliser le contenu du post du formulaire
+        _id: Date.now().toString(), // Utilisation d'un timestamp comme ID temporaire
+        post_name: this.addForm.post_name,
+        post_content: this.addForm.post_content,
         attributes: {
-          creation_date: new Date().toISOString(), // Définir la date de création
-          author: this.addForm.attributes.author // Utiliser l'auteur du formulaire
+          creation_date: new Date().toISOString(),
+          author: this.addForm.attributes.author
         },
-        comments: this.addForm.comments // Utiliser les commentaires du formulaire
+        comments: this.addForm.comments
       };
-      this.putDocument(newDoc); // Appeler la méthode pour ajouter le document à la base de données
-      this.cancelAdd(); // Réinitialiser le formulaire d'ajout
-    },
- 
-    // Méthode pour ajouter un document dans PouchDB
-    putDocument(document: Post) {
-      const db = ref(this.storage).value; // Récupérer la référence de la base de données
-      if (db) { // Vérifier si la base de données est disponible
-        db.put(document).then(() => {
-          console.log('Add ok'); // Log pour succès
-          this.fetchData(); // Rafraîchir les données après l'ajout
-        // La synchronisation gère automatiquement les mises à jour de la base de données distante
+
+      const db = ref(this.storage).value;
+      if (db) {
+        db.put(newDoc).then(() => {
+          console.log('Add ok');
+          this.fetchData();
+          // this.updateDistantDatabase(); // Synchroniser après l'ajout
+          this.cancelAdd();
         }).catch((error) => {
-          console.log('Add ko', error); // Gérer les erreurs
+          console.log('Add ko', error);
         });
       }
     },
- 
-    // Méthode pour annuler l'ajout d'un post
+
     cancelAdd() {
-      this.isAdding = false; // Masquer le formulaire d'ajout
-      this.addForm = { // Réinitialiser les champs du formulaire
+      this.isAdding = false;
+      this.addForm = {
         post_name: '',
         post_content: '',
         attributes: { author: '' },
         comments: []
       };
     },
- 
-    // Méthode pour ajouter un commentaire au formulaire
+
     addComment() {
-      this.addForm.comments.push({ comment: '', author: '' }); // Ajouter un commentaire vide au tableau
+      this.addForm.comments.push({ comment: '', author: '' });
     },
- 
-    // Méthode pour supprimer un commentaire spécifique du formulaire
+
     deleteComment(index: number) {
-      this.addForm.comments.splice(index, 1); // Supprimer le commentaire à l'index spécifié
+      this.addForm.comments.splice(index, 1);
     },
- 
-    // Méthode pour démarrer l'édition d'un post
+
+    // Nouvelle méthode pour ajouter un commentaire dans le formulaire d'édition
+    addEditComment() {
+      this.editForm.comments.push({ comment: '', author: '' });
+    },
+
+    // Nouvelle méthode pour supprimer un commentaire dans le formulaire d'édition
+    deleteEditComment(index: number) {
+      this.editForm.comments.splice(index, 1);
+    },
+
+    // Modification de la méthode startEdit pour s'assurer que comments est initialisé
     startEdit(post: Post) {
       this.editForm = {
-        post_name: post.post_name, // Remplir le formulaire d'édition avec les données du post
+        post_name: post.post_name,
         post_content: post.post_content,
         _id: post._id,
         _rev: post._rev || '',
         attributes: {
-          author: post.attributes.author // Remplir l'auteur
+          author: post.attributes.author
         },
-        comments: post.comments || [] // Remplir les commentaires
+        comments: [...(post.comments || [])] // S'assure que comments est cloné correctement
       };
-      this.isEditing = true; // Afficher le formulaire d'édition
-      this.isAdding = false; // Masquer le formulaire d'ajout
+      this.isEditing = true;
+      this.isAdding = false;
     },
- 
-    // Méthode pour supprimer un post
+
     deleteDocument(post: Post) {
-      const db = ref(this.storage).value; // Récupérer la référence de la base de données
-      if (db && post._id && post._rev) { // Vérifier que le post a un ID et une révision
-        console.log('Deleting document:', post); // Log pour afficher le document qui sera supprimé
+      const db = ref(this.storage).value;
+      if (db && post._id && post._rev) {
+        console.log('Deleting document:', post);
         db.remove(post._id, post._rev).then(() => {
-          console.log('Delete ok'); // Log pour succès
-          this.fetchData(); // Rafraîchir les données après la suppression
+          console.log('Delete ok');
+          this.fetchData();
+          // this.updateDistantDatabase(); // Synchroniser après la suppression
         }).catch((error) => {
-          console.log('Delete ko', error); // Gérer les erreurs
+          console.log('Delete ko', error);
         });
-      } else {
-        console.log('Erreur : document _id ou _rev manquant pour la suppression'); // Gérer l'erreur si ID ou révision manquant
       }
     },
- 
-    // Méthode pour enregistrer les modifications d'un post
+
     saveEdit() {
-      const db = ref(this.storage).value; // Récupérer la référence de la base de données
-      if (db && this.editForm._id && this.editForm._rev) { // Vérifier que le formulaire d'édition a un ID et une révision
+      const db = ref(this.storage).value;
+      if (db && this.editForm._id && this.editForm._rev) {
         const updatedDoc: Post = {
-          _id: this.editForm._id, // Utiliser l'ID du formulaire d'édition
-          _rev: this.editForm._rev, // Utiliser la révision du formulaire d'édition
-          post_name: this.editForm.post_name, // Utiliser le nom du post du formulaire
-          post_content: this.editForm.post_content, // Utiliser le contenu du post du formulaire
+          _id: this.editForm._id,
+          _rev: this.editForm._rev,
+          post_name: this.editForm.post_name,
+          post_content: this.editForm.post_content,
           attributes: {
-            creation_date: new Date().toISOString(), // Mettre à jour la date de création
-            author: this.editForm.attributes.author // Utiliser l'auteur du formulaire
+            creation_date: new Date().toISOString(),
+            author: this.editForm.attributes.author
           },
-          comments: this.editForm.comments // Utiliser les commentaires du formulaire
+          comments: this.editForm.comments
         };
 
-        console.log('Saving document:', updatedDoc); // Log pour afficher le document qui sera enregistré
-        
         db.put(updatedDoc).then(() => {
-          console.log('Update ok', updatedDoc); // Log pour succès avec le document mis à jour
-          this.fetchData(); // Rafraîchir les données après la mise à jour
-          this.cancelEdit(); // Réinitialiser le formulaire d'édition
+          console.log('Update ok');
+          this.fetchData();
+          // this.updateDistantDatabase(); // Synchroniser après la mise à jour
+          this.cancelEdit();
         }).catch((error) => {
-          console.log('Erreur de mise à jour', error); // Gérer les erreurs
+          console.log('Update ko', error);
         });
       }
     },
- 
-    // Méthode pour annuler l'édition d'un post
+
     cancelEdit() {
-      this.isEditing = false; // Masquer le formulaire d'édition
-      this.editForm = { // Réinitialiser les champs du formulaire d'édition
+      this.isEditing = false;
+      this.editForm = {
         post_name: '',
         post_content: '',
         _id: '',
@@ -236,81 +305,420 @@ export default {
         attributes: { author: '' },
         comments: []
       };
-    }
+    },
+
+    previewPost(postId: string) {
+      this.previewPostId = this.previewPostId === postId ? null : postId;
+    },
+
   }
 };
 </script>
- 
+
 <template>
-  <h1>Nombre de posts : {{ postsData.length }}</h1>
-  <button @click="startAdd">Ajouter un document</button>
- 
-  <ul>
-    <li v-for="post in postsData" :key="post._id">
-      <div class="ucfirst">
-        {{ post.post_name }}
-        <em v-if="post.attributes.creation_date">- {{ post.attributes.creation_date }}</em>
+  <div class="app-container">
+    <header class="header">
+      <h1 class="title">Gestion des Posts ({{ postsData.length }})</h1>
+      <div class="sync-buttons">
+        <button class="btn sync" @click="updateLocalDatabase">
+          <span class="icon">↓</span> Synchroniser depuis le serveur
+        </button>
+        <button class="btn sync" @click="updateDistantDatabase">
+          <span class="icon">↑</span> Synchroniser vers le serveur
+        </button>
+        <button class="btn sync-both" @click="syncBothDatabases">
+          <span class="icon">↕</span> Synchronisation bidirectionnelle
+        </button>
       </div>
-      <button @click="startEdit(post)">Modifier</button>
-      <button @click="deleteDocument(post)">Supprimer</button>
-    </li>
-  </ul>
- 
-  <!-- Formulaire d'ajout de document -->
-  <div v-if="isAdding">
-    <h2>Ajouter un nouveau document</h2>
-    <form @submit.prevent="addDocument">
-      <label for="add_post_name">Nom du post :</label>
-      <input type="text" v-model="addForm.post_name" id="add_post_name" required />
- 
-      <label for="add_post_content">Contenu du post :</label>
-      <textarea v-model="addForm.post_content" id="add_post_content" required></textarea>
- 
-      <label for="add_author">Auteur :</label>
-      <input type="text" v-model="addForm.attributes.author" id="add_author" required />
- 
-      <h3>Commentaires</h3>
-      <div v-for="(comment, index) in addForm.comments" :key="index">
-        <label :for="'comment' + index">Commentaire :</label>
-        <input type="text" v-model="comment.comment" :id="'comment' + index" required />
- 
-        <label :for="'author' + index">Auteur du commentaire :</label>
-        <input type="text" v-model="comment.author" :id="'author' + index" required />
- 
-        <button type="button" @click="deleteComment(index)">Supprimer le commentaire</button>
+    </header>
+
+    <main class="main-content">
+      <button class="btn add-btn" @click="startAdd">+ Ajouter un document</button>
+
+      <ul class="posts-list">
+        <li v-for="post in postsData" :key="post._id" class="post-card">
+          <div class="post-header">
+            <h2 class="post-title ucfirst">{{ post.post_name }}</h2>
+            <div class="post-meta">
+              <em v-if="post.attributes.creation_date">
+                Créé le: {{ new Date(post.attributes.creation_date).toLocaleDateString() }}
+              </em>
+            </div>
+          </div>
+          
+          <div class="post-content">{{ post.post_content }}</div>
+
+          <div v-if="previewPostId === post._id" class="post-preview">
+            <div v-if="post.comments.length > 0">
+              <h3>Commentaires</h3>
+              <ul>
+                <li v-for="(comment, index) in post.comments" :key="index">
+                  <p><strong>{{ comment.author }}:</strong> {{ comment.comment }}</p>
+                </li>
+              </ul>
+            </div>
+            <div v-else>
+              <p>Aucun commentaire pour ce post.</p>
+            </div>
+          </div>
+          
+          <div class="post-actions">
+            <button class="btn preview" @click="previewPost(post._id)">
+              {{ previewPostId === post._id ? 'Fermer l\'aperçu' : 'Aperçu' }}
+            </button>
+            <button class="btn edit" @click="startEdit(post)">Modifier</button>
+            <button class="btn delete" @click="deleteDocument(post)">Supprimer</button>
+          </div>
+        </li>
+      </ul>
+    </main>
+
+    <!-- Formulaire d'ajout -->
+    <div v-if="isAdding" class="modal">
+      <div class="modal-content">
+        <h2>Ajouter un nouveau document</h2>
+        <form @submit.prevent="addDocument" class="form">
+          <div class="form-group">
+            <label for="add_post_name">Nom du post :</label>
+            <input type="text" v-model="addForm.post_name" id="add_post_name" required />
+          </div>
+
+          <div class="form-group">
+            <label for="add_post_content">Contenu du post :</label>
+            <textarea v-model="addForm.post_content" id="add_post_content" required></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="add_author">Auteur :</label>
+            <input type="text" v-model="addForm.attributes.author" id="add_author" required />
+          </div>
+
+          <div class="comments-section">
+            <h3>Commentaires</h3>
+            <div v-for="(comment, index) in addForm.comments" :key="index" class="comment-form">
+              <div class="form-group">
+                <label :for="'comment' + index">Commentaire :</label>
+                <input type="text" v-model="comment.comment" :id="'comment' + index" required />
+              </div>
+
+              <div class="form-group">
+                <label :for="'author' + index">Auteur du commentaire :</label>
+                <input type="text" v-model="comment.author" :id="'author' + index" required />
+              </div>
+
+              <button type="button" class="btn delete small" @click="deleteComment(index)">
+                Supprimer le commentaire
+              </button>
+            </div>
+            <button type="button" class="btn add-comment" @click="addComment">
+              + Ajouter un commentaire
+            </button>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn submit">Enregistrer</button>
+            <button type="button" class="btn cancel" @click="cancelAdd">Annuler</button>
+          </div>
+        </form>
       </div>
-      <button type="button" @click="addComment">Ajouter un commentaire</button>
- 
-      <button type="submit">Enregistrer</button>
-      <button type="button" @click="cancelAdd">Annuler</button>
-    </form>
+    </div>
   </div>
- 
-  <!-- Formulaire de modification de document -->
-  <div v-if="isEditing">
-    <h2>Modifier le document</h2>
-    <form @submit.prevent="saveEdit">
-      <label for="edit_post_name">Nom du post :</label>
-      <input type="text" v-model="editForm.post_name" id="edit_post_name" required />
- 
-      <label for="edit_post_content">Contenu du post :</label>
-      <textarea v-model="editForm.post_content" id="edit_post_content" required></textarea>
- 
-      <label for="edit_author">Auteur :</label>
-      <input type="text" v-model="editForm.attributes.author" id="edit_author" required />
- 
-      <h3>Commentaires</h3>
-      <div v-for="(comment, index) in editForm.comments" :key="index">
-        <label :for="'edit_comment' + index">Commentaire :</label>
-        <input type="text" v-model="comment.comment" :id="'edit_comment' + index" required />
- 
-        <label :for="'edit_author_comment' + index">Auteur du commentaire :</label>
-        <input type="text" v-model="comment.author" :id="'edit_author_comment' + index" required />
-      </div>
- 
-      <button type="submit">Enregistrer</button>
-      <button type="button" @click="cancelEdit">Annuler</button>
-    </form>
+    <!-- Formulaire de modification -->
+  <div v-if="isEditing" class="modal">
+    <div class="modal-content">
+      <h2>Modifier le document</h2>
+      <form @submit.prevent="saveEdit" class="form">
+        <div class="form-group">
+          <label for="edit_post_name">Nom du post :</label>
+          <input type="text" v-model="editForm.post_name" id="edit_post_name" required />
+        </div>
+
+        <div class="form-group">
+          <label for="edit_post_content">Contenu du post :</label>
+          <textarea v-model="editForm.post_content" id="edit_post_content" required></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="edit_author">Auteur :</label>
+          <input type="text" v-model="editForm.attributes.author" id="edit_author" required />
+        </div>
+
+        <div class="comments-section">
+          <h3>Commentaires</h3>
+          <div v-for="(comment, index) in editForm.comments" :key="index" class="comment-form">
+            <div class="form-group">
+              <label :for="'edit_comment' + index">Commentaire :</label>
+              <input type="text" v-model="comment.comment" :id="'edit_comment' + index" required />
+            </div>
+
+            <div class="form-group">
+              <label :for="'edit_author_comment' + index">Auteur du commentaire :</label>
+              <input type="text" v-model="comment.author" :id="'edit_author_comment' + index" required />
+            </div>
+
+            <button type="button" class="btn delete small" @click="deleteEditComment(index)">
+              Supprimer le commentaire
+            </button>
+          </div>
+          <button type="button" class="btn add-comment" @click="addEditComment">
+            + Ajouter un commentaire
+          </button>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn submit">Enregistrer</button>
+          <button type="button" class="btn cancel" @click="cancelEdit">Annuler</button>
+        </div>
+      </form>
+    </div>
   </div>
 </template>
- 
+
+<style scoped>
+/* Variables CSS */
+:root {
+  --primary-color: #3498db;
+  --danger-color: #e74c3c;
+  --success-color: #2ecc71;
+  --warning-color: #f1c40f;
+  --text-color: #2c3e50;
+  --background-color: #ecf0f1;
+  --card-background: #ffffff;
+  --border-radius: 8px;
+  --spacing: 1rem;
+}
+
+/* Styles de base */
+.app-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  font-family: Arial, sans-serif;
+  color: var(--text-color);
+}
+
+.header {
+  margin-bottom: 2rem;
+  text-align: center;
+}
+
+.title {
+  color: var(--primary-color);
+  margin-bottom: 1rem;
+}
+.post-preview {
+  background: var(--background-color);
+  padding: var(--spacing);
+  border-radius: var(--border-radius);
+  margin-top: var(--spacing);
+  font-style: italic;
+  color: var(--text-color);
+  font-size: 1em;
+}
+
+/* Boutons */
+.btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--border-radius);
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.3s ease;
+  margin: 0 5px;
+}
+
+.btn:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.sync {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+.edit {
+  background-color: var(--warning-color);
+  color: var(--text-color);
+}
+
+.delete {
+  background-color: var(--danger-color);
+  color: white;
+}
+
+.submit {
+  background-color: var(--success-color);
+  color: white;
+}
+
+.cancel {
+  background-color: #95a5a6;
+  color: white;
+}
+
+.add-btn {
+  background-color: var(--success-color);
+  color: white;
+  font-size: 1.1em;
+  margin: 1rem 0;
+}
+
+/* Liste des posts */
+.posts-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.post-card {
+  background: var(--card-background);
+  border-radius: var(--border-radius);
+  padding: var(--spacing);
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  transition: transform 0.3s ease;
+}
+
+.post-card:hover {
+  transform: translateY(-3px);
+}
+
+.post-title {
+  margin: 0;
+  color: var(--primary-color);
+  font-size: 1.2em;
+}
+
+.post-meta {
+  font-size: 0.9em;
+  color: #666;
+  margin: 5px 0;
+}
+
+.post-content {
+  margin: 10px 0;
+  line-height: 1.5;
+}
+
+.post-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* Modal et formulaires */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: var(--card-background);
+  padding: 2rem;
+  border-radius: var(--border-radius);
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: bold;
+}
+
+.form-group input,
+.form-group textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: var(--border-radius);
+  font-size: 1em;
+}
+
+.form-group textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 1rem;
+}
+
+/* Section commentaires */
+.comments-section {
+  margin: 1rem 0;
+  padding: 1rem;
+  background: var(--background-color);
+  border-radius: var(--border-radius);
+}
+
+.comment-form {
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #ddd;
+}
+
+.add-comment {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+.sync-both {
+  background-color: brown;
+  color: white;
+  border-radius: 10px;
+}
+
+.sync-buttons {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.btn.small {
+  padding: 4px 8px;
+  font-size: 0.8em;
+  margin-top: 5px;
+}
+/* Utilitaires */
+.ucfirst {
+  text-transform: capitalize;
+}
+
+/* Media queries pour la responsivité */
+@media (max-width: 768px) {
+  .posts-list {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-content {
+    width: 95%;
+    padding: 1rem;
+  }
+
+  .btn {
+    padding: 6px 12px;
+    font-size: 0.9em;
+  }
+}
+</style>
