@@ -1,6 +1,8 @@
 <script lang="ts">
 import { ref } from 'vue';
 import PouchDB from 'pouchdb';
+import PouchDBFind from 'pouchdb-find'
+PouchDB.plugin(PouchDBFind)
 
 // Interfaces existantes
 declare interface Comment {
@@ -30,6 +32,7 @@ export default {
       isEditing: false,
       isAdding: false,
       previewPostId: null as string | null,
+      searchTitle: '',
       addForm: {
         post_name: '',
         post_content: '',
@@ -53,6 +56,7 @@ export default {
 
   mounted() {
     this.initDatabase();
+    this.createTitleIndex();
     this.fetchData();
     this.watchRemoteDatabase();
   },
@@ -100,6 +104,61 @@ export default {
           console.log('fetchData error', error);
         });
       }
+    },
+
+    async createTitleIndex() {
+      const db = ref(this.storage).value
+      if (!db) {
+        console.error('Database not valid')
+        return
+      }
+      try {
+        // Liste des index existants
+        const existingIndexes = await db.getIndexes()
+        const indexExists = existingIndexes.indexes.some(
+          (index) => index.name === 'post_name_index'
+        )
+ 
+        if (!indexExists) {
+          // Crée l'index uniquement s'il n'existe pas
+          await db.createIndex({
+            index: {
+              fields: ['post_name'],
+              name: 'post_name_index' // Nom explicite de l'index
+            }
+          })
+          console.log('Index on "post_name" created successfully')
+        } else {
+          console.log('Index on "post_name" already exists')
+        }
+      } catch (error) {
+        console.error('Error ensuring index:', error)
+      }
+    },
+
+    async searchByTitle(title: string) {
+      const db = ref(this.storage).value
+      if (!db) {
+        console.error('Database not valid')
+        return
+      }
+ 
+      try {
+        const result = await db.find({
+          selector: {
+            post_name: { $regex: new RegExp(`.*${title}.*`, 'i') } // Recherche exacte
+          }
+        })
+        console.log('Search results:', result.docs)
+        this.postsData = result.docs as Post[] // Met à jour les données affichées
+      } catch (error) {
+        console.error('Error searching by title:', error)
+      }
+    },
+
+    resetSearch() {
+      this.searchTitle = '' // Réinitialiser le champ de recherche
+      this.fetchData() // Recharger tous les documents
     },
 
     // Méthodes de synchronisation
@@ -319,6 +378,13 @@ export default {
   <div class="app-container">
     <header class="header">
       <h1 class="title">Gestion des Posts ({{ postsData.length }})</h1>
+      <div class="search-container">
+        <label for="title-search">Rechercher par titre :</label>
+        <input id="title-search" v-model="searchTitle" placeholder="Entrez un titre de post" />
+        <button @click="searchByTitle(searchTitle)" class="search-btn">Rechercher</button>
+        <button @click="resetSearch" class="reset-btn">Réinitialiser</button>
+      </div>
+      
       <div class="sync-buttons">
         <button class="btn sync" @click="updateLocalDatabase">
           <span class="icon">↓</span> Synchroniser depuis le serveur
@@ -349,18 +415,18 @@ export default {
           <div class="post-content">{{ post.post_content }}</div>
 
           <div v-if="previewPostId === post._id" class="post-preview">
-            <div v-if="post.comments.length > 0">
-              <h3>Commentaires</h3>
-              <ul>
-                <li v-for="(comment, index) in post.comments" :key="index">
-                  <p><strong>{{ comment.author }}:</strong> {{ comment.comment }}</p>
-                </li>
-              </ul>
-            </div>
-            <div v-else>
-              <p>Aucun commentaire pour ce post.</p>
-            </div>
+          <div v-if="post.comments.length > 0">
+            <h3>Commentaires</h3>
+            <ul>
+              <li v-for="(comment, index) in post.comments" :key="index">
+                <p><strong>{{ comment.author }}:</strong> {{ comment.comment }}</p>
+              </li>
+            </ul>
           </div>
+          <div v-else>
+            <p>Aucun commentaire pour ce post.</p>
+          </div>
+        </div>
           
           <div class="post-actions">
             <button class="btn preview" @click="previewPost(post._id)">
@@ -516,6 +582,67 @@ export default {
   font-size: 1em;
 }
 
+.search-container {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.search-container label {
+  font-size: 1rem;
+  color: white;
+  white-space: nowrap;
+}
+
+#title-search {
+  flex: 1;
+  padding: 0.5rem 1rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 4px;
+  font-size: 1rem;
+  transition: border-color 0.3s ease;
+}
+
+#title-search:focus {
+  outline: none;
+  border-color: #4a90e2;
+  box-shadow: 0 0 5px rgba(74, 144, 226, 0.3);
+}
+
+#title-search::placeholder {
+  color: #999;
+}
+
+.search-btn {
+  padding: 0.5rem 1.2rem;
+  background-color: brown;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+
+.search-btn:active {
+  transform: translateY(1px);
+}
+
+.reset-btn {
+  padding: 0.5rem 1.2rem;
+  background-color: #95a5a6;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
 /* Boutons */
 .btn {
   padding: 8px 16px;
@@ -535,6 +662,7 @@ export default {
 .sync {
   background-color: var(--primary-color);
   color: white;
+  border: 2px solid brown;
 }
 
 .edit {
