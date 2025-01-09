@@ -4,7 +4,10 @@ import PouchDB from 'pouchdb';
 import PouchDBFind from 'pouchdb-find'
 PouchDB.plugin(PouchDBFind)
 
-// Interfaces existantes
+declare interface Media {
+  url: string;
+}
+
 declare interface Comment {
   comment: string;
   author: string;
@@ -20,6 +23,7 @@ declare interface Post {
     author: string;
   },
   comments: Comment[];
+  media: Media[];
 }
 
 export default {
@@ -39,7 +43,8 @@ export default {
         attributes: {
           author: ''
         },
-        comments: [] as Comment[]
+        comments: [] as Comment[],
+        media: [] as Media[]
       },
       editForm: {
         post_name: '',
@@ -49,7 +54,8 @@ export default {
         attributes: {
           author: ''
         },
-        comments: [] as Comment[]
+        comments: [] as Comment[],
+        media: [] as Media[]
       }
     };
   },
@@ -172,7 +178,8 @@ export default {
             creation_date: new Date().toISOString(),
             author: `Auteur ${this.randomString(5)}`
           },
-          comments: [] // Aucun commentaire pour le moment
+          comments: [], // Aucun commentaire pour le moment
+          media: [] // Aucun média pour le moment
         };
         fakePosts.push(fakePost);
       }
@@ -292,7 +299,8 @@ export default {
           creation_date: new Date().toISOString(),
           author: this.addForm.attributes.author
         },
-        comments: this.addForm.comments
+        comments: this.addForm.comments,
+        media: this.addForm.media
       };
 
       const db = ref(this.storage).value;
@@ -314,7 +322,8 @@ export default {
         post_name: '',
         post_content: '',
         attributes: { author: '' },
-        comments: []
+        comments: [],
+        media: []
       };
     },
 
@@ -346,7 +355,8 @@ export default {
         attributes: {
           author: post.attributes.author
         },
-        comments: [...(post.comments || [])] // S'assure que comments est cloné correctement
+        comments: [...(post.comments || [])], // S'assure que comments est cloné correctement
+        media: [...(post.media || [])]
       };
       this.isEditing = true;
       this.isAdding = false;
@@ -378,12 +388,14 @@ export default {
             creation_date: new Date().toISOString(),
             author: this.editForm.attributes.author
           },
-          comments: this.editForm.comments
+          comments: this.editForm.comments,
+          media: this.editForm.media
         };
 
         db.put(updatedDoc).then(() => {
           console.log('Update ok');
           this.fetchData();
+          this.cancelEdit();
           // this.updateDistantDatabase(); // Synchroniser après la mise à jour
           this.cancelEdit();
         }).catch((error) => {
@@ -400,12 +412,29 @@ export default {
         _id: '',
         _rev: '',
         attributes: { author: '' },
-        comments: []
+        comments: [],
+        media: []
       };
     },
 
     previewPost(postId: string) {
       this.previewPostId = this.previewPostId === postId ? null : postId;
+    },
+
+    addMedia() {
+      this.addForm.media.push({ url: ''});
+    },
+
+    deleteMedia(index: number) {
+      this.addForm.media.splice(index, 1);
+    },
+
+    addEditMedia() {
+      this.editForm.media.push({ url: ''});
+    },
+
+    deleteEditMedia(index: number) {
+      this.editForm.media.splice(index, 1);
     },
 
   }
@@ -451,6 +480,13 @@ export default {
             </div>
           </div>
           
+          <div class="media-section">
+            <h3>Médias</h3>
+            <div v-for="(media, index) in post.media" :key="index" class="media-item">
+              <img :src="media.url" :alt="'Media ' + (index + 1)" />
+            </div>
+          </div>
+
           <div class="post-content">{{ post.post_content }}</div>
 
           <div v-if="previewPostId === post._id" class="post-preview">
@@ -496,6 +532,24 @@ export default {
           <div class="form-group">
             <label for="add_author">Auteur :</label>
             <input type="text" v-model="addForm.attributes.author" id="add_author" required />
+          </div>
+
+          <div class="media-section">
+            <h3>Médias</h3>
+            <div v-for="(media, index) in addForm.media" :key="index" class="media-form">
+              <div class="form-group">
+                <label :for="'media_url' + index">URL :</label>
+                <input type="text" v-model="media.url" :id="'media_url' + index" required />
+              </div>
+
+
+              <button type="button" class="btn delete small" @click="deleteMedia(index)">
+                Supprimer le média
+              </button>
+            </div>
+            <button type="button" class="btn add-media" @click="addMedia">
+              + Ajouter un média
+            </button>
           </div>
 
           <div class="comments-section">
@@ -546,6 +600,23 @@ export default {
         <div class="form-group">
           <label for="edit_author">Auteur :</label>
           <input type="text" v-model="editForm.attributes.author" id="edit_author" required />
+        </div>
+
+        <div class="media-section">
+          <h3>Médias</h3>
+          <div v-for="(media, index) in editForm.media" :key="index" class="media-form">
+            <div class="form-group">
+              <label :for="'edit_media_url' + index">URL :</label>
+              <input type="text" v-model="media.url" :id="'edit_media_url' + index" required />
+            </div>
+
+            <button type="button" class="btn delete small" @click="deleteEditMedia(index)">
+              Supprimer le média
+            </button>
+          </div>
+          <button type="button" class="btn add-media" @click="addEditMedia">
+            + Ajouter un média
+          </button>
         </div>
 
         <div class="comments-section">
