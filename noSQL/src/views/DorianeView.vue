@@ -161,6 +161,44 @@ export default {
       this.fetchData() // Recharger tous les documents
     },
 
+    generateFakePosts() {
+      const fakePosts: Post[] = [];
+      for (let i = 0; i < 10; i++) {
+        const fakePost: Post = {
+          _id: Date.now().toString() + i, // Utilisation de l'heure actuelle pour garantir un ID unique
+          post_name: `Post ${i + 1}: ${this.randomString(10)}`, // Génération d'un titre aléatoire
+          post_content: `Voici un contenu aléatoire pour le post numéro ${i + 1}. Il peut contenir n'importe quel texte.`,
+          attributes: {
+            creation_date: new Date().toISOString(),
+            author: `Auteur ${this.randomString(5)}`
+          },
+          comments: [] // Aucun commentaire pour le moment
+        };
+        fakePosts.push(fakePost);
+      }
+
+      const db = ref(this.storage).value;
+      if (db) {
+        const batch = fakePosts.map(post => db.put(post)); // Mise en lot des ajouts
+        Promise.all(batch).then(() => {
+          console.log('10 faux posts ajoutés');
+          this.fetchData();
+        }).catch((error) => {
+          console.log('Erreur lors de l\'ajout des faux posts', error);
+        });
+      }
+    },
+
+    // Fonction pour générer une chaîne de caractères aléatoire
+    randomString(length: number): string {
+      const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      let result = '';
+      for (let i = 0; i < length; i++) {
+        result += characters.charAt(Math.floor(Math.random() * characters.length));
+      }
+      return result;
+    },
+
     // Méthodes de synchronisation
     updateLocalDatabase() {
       const db = ref(this.storage).value;
@@ -400,6 +438,7 @@ export default {
 
     <main class="main-content">
       <button class="btn add-btn" @click="startAdd">+ Ajouter un document</button>
+      <button class="btn generate-fake-posts-btn" @click="generateFakePosts">Générer 10 faux posts</button>
 
       <ul class="posts-list">
         <li v-for="post in postsData" :key="post._id" class="post-card">
