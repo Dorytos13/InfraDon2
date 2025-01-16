@@ -5,7 +5,9 @@ import PouchDBFind from 'pouchdb-find'
 PouchDB.plugin(PouchDBFind)
 
 declare interface Media {
+  file?: File;
   url: string;
+  type: 'image';
 }
 
 declare interface Comment {
@@ -88,29 +90,30 @@ export default {
 
     // Récupération des données
     fetchData() {
-      const db = ref(this.storage).value;
-      if (db) {
-        db.allDocs({
-          include_docs: true,
-          attachments: true
-        }).then((result: any) => {
-          console.log('fetchData success =>', result.rows);
-          this.postsData = result.rows.map((row: any) => ({
-            _id: row.id,
-            _rev: row.doc._rev,
-            post_name: row.doc.post_name,
-            post_content: row.doc.post_content,
-            attributes: {
-              creation_date: row.doc.attributes?.creation_date || '',
-              author: row.doc.attributes?.author || ''
-            },
-            comments: row.doc.comments || []
-          }));
-        }).catch((error: any) => {
-          console.log('fetchData error', error);
-        });
-      }
-    },
+    const db = ref(this.storage).value;
+    if (db) {
+      db.allDocs({
+        include_docs: true,
+        attachments: true
+      }).then((result: any) => {
+        console.log('fetchData success =>', result.rows);
+        this.postsData = result.rows.map((row: any) => ({
+          _id: row.id,
+          _rev: row.doc._rev,
+          post_name: row.doc.post_name,
+          post_content: row.doc.post_content,
+          attributes: {
+            creation_date: row.doc.attributes?.creation_date || '',
+            author: row.doc.attributes?.author || ''
+          },
+          comments: row.doc.comments || [],
+          media: row.doc.media || [] // Ajout de la récupération des médias
+        }));
+      }).catch((error: any) => {
+        console.log('fetchData error', error);
+      });
+    }
+  },
 
     async createTitleIndex() {
       const db = ref(this.storage).value
@@ -421,20 +424,81 @@ export default {
       this.previewPostId = this.previewPostId === postId ? null : postId;
     },
 
+    async fileToBase64(file: File): Promise<string> {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = error => reject(error);
+      });
+    },
+
+    // Méthode pour gérer le téléchargement d'image dans le formulaire d'ajout
+    async handleImageUpload(event: Event, index: number, formType: 'add' | 'edit') {
+      const input = event.target as HTMLInputElement;
+      if (!input.files?.length) return;
+
+      const file = input.files[0];
+      
+      // Vérifier le type de fichier
+      if (!file.type.startsWith('image/')) {
+        alert('Veuillez sélectionner une image (JPEG ou PNG)');
+        return;
+      }
+
+      try {
+        const base64Url = await this.fileToBase64(file);
+        
+        if (formType === 'add') {
+          this.addForm.media[index] = {
+            file: file,
+            url: base64Url,
+            type: 'image'
+          };
+        } else {
+          this.editForm.media[index] = {
+            file: file,
+            url: base64Url,
+            type: 'image'
+          };
+        }
+      } catch (error) {
+        console.error('Erreur lors du chargement de l\'image:', error);
+        alert('Erreur lors du chargement de l\'image');
+      }
+    },
+
+    // Méthode modifiée pour ajouter un média
     addMedia() {
-      this.addForm.media.push({ url: ''});
+      this.addForm.media.push({ url: '', type: 'image' });
+    },
+
+    // Méthode modifiée pour ajouter un média en édition
+    addEditMedia() {
+      this.editForm.media.push({ url: '', type: 'image' });
     },
 
     deleteMedia(index: number) {
-      this.addForm.media.splice(index, 1);
+      // Vérifier si le média existe
+      if (this.addForm.media[index]) {
+        // Supprimer le média de l'array
+        this.addForm.media.splice(index, 1);
+      }
     },
 
-    addEditMedia() {
-      this.editForm.media.push({ url: ''});
-    },
-
+    // Méthode pour supprimer un média du formulaire d'édition
     deleteEditMedia(index: number) {
-      this.editForm.media.splice(index, 1);
+      // Vérifier si le média existe
+      if (this.editForm.media[index]) {
+        // Supprimer le média de l'array
+        this.editForm.media.splice(index, 1);
+      }
+    },
+
+    handleImageError(event: Event) {
+      console.error("Erreur de chargement de l'image");
+      const imgElement = event.target as HTMLImageElement;
+      imgElement.style.display = 'none'; // Cache l'image en cas d'erreur
     },
 
   }
@@ -470,38 +534,44 @@ export default {
       <button class="btn generate-fake-posts-btn" @click="generateFakePosts">Générer 10 faux posts</button>
 
       <ul class="posts-list">
-        <li v-for="post in postsData" :key="post._id" class="post-card">
-          <div class="post-header">
-            <h2 class="post-title ucfirst">{{ post.post_name }}</h2>
-            <div class="post-meta">
-              <em v-if="post.attributes.creation_date">
-                Créé le: {{ new Date(post.attributes.creation_date).toLocaleDateString() }}
-              </em>
-            </div>
-          </div>
-          
-          <div class="media-section">
-            <h3>Médias</h3>
-            <div v-for="(media, index) in post.media" :key="index" class="media-item">
-              <img :src="media.url" :alt="'Media ' + (index + 1)" />
-            </div>
-          </div>
-
-          <div class="post-content">{{ post.post_content }}</div>
-
-          <div v-if="previewPostId === post._id" class="post-preview">
-          <div v-if="post.comments.length > 0">
-            <h3>Commentaires</h3>
-            <ul>
-              <li v-for="(comment, index) in post.comments" :key="index">
-                <p><strong>{{ comment.author }}:</strong> {{ comment.comment }}</p>
-              </li>
-            </ul>
-          </div>
-          <div v-else>
-            <p>Aucun commentaire pour ce post.</p>
+      <li v-for="post in postsData" :key="post._id" class="post-card">
+        <div class="post-header">
+          <h2 class="post-title ucfirst">{{ post.post_name }}</h2>
+          <div class="post-meta">
+            <em v-if="post.attributes.creation_date">
+              Créé le: {{ new Date(post.attributes.creation_date).toLocaleDateString() }}
+            </em>
           </div>
         </div>
+        
+        <!--affichage des médias -->
+        <div v-if="post.media && post.media.length > 0" class="media-section">
+          <h3>Images</h3>
+          <div v-for="(media, index) in post.media" :key="index" class="media-item">
+            <img 
+              :src="media.url" 
+              :alt="'Image ' + (index + 1)" 
+              class="post-image"
+              @error="handleImageError"
+            />
+          </div>
+        </div>
+
+      <div class="post-content">{{ post.post_content }}</div>
+
+          <div v-if="previewPostId === post._id" class="post-preview">
+            <div v-if="post.comments.length > 0">
+              <h3>Commentaires</h3>
+              <ul>
+                <li v-for="(comment, index) in post.comments" :key="index">
+                  <p><strong>{{ comment.author }}:</strong> {{ comment.comment }}</p>
+                </li>
+              </ul>
+            </div>
+            <div v-else>
+              <p>Aucun commentaire pour ce post.</p>
+            </div>
+          </div>
           
           <div class="post-actions">
             <button class="btn preview" @click="previewPost(post._id)">
@@ -514,73 +584,84 @@ export default {
       </ul>
     </main>
 
-    <!-- Formulaire d'ajout -->
-    <div v-if="isAdding" class="modal">
-      <div class="modal-content">
-        <h2>Ajouter un nouveau document</h2>
-        <form @submit.prevent="addDocument" class="form">
-          <div class="form-group">
-            <label for="add_post_name">Nom du post :</label>
-            <input type="text" v-model="addForm.post_name" id="add_post_name" required />
-          </div>
-
-          <div class="form-group">
-            <label for="add_post_content">Contenu du post :</label>
-            <textarea v-model="addForm.post_content" id="add_post_content" required></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="add_author">Auteur :</label>
-            <input type="text" v-model="addForm.attributes.author" id="add_author" required />
-          </div>
-
-          <div class="media-section">
-            <h3>Médias</h3>
-            <div v-for="(media, index) in addForm.media" :key="index" class="media-form">
-              <div class="form-group">
-                <label :for="'media_url' + index">URL :</label>
-                <input type="text" v-model="media.url" :id="'media_url' + index" required />
-              </div>
-
-
-              <button type="button" class="btn delete small" @click="deleteMedia(index)">
-                Supprimer le média
-              </button>
-            </div>
-            <button type="button" class="btn add-media" @click="addMedia">
-              + Ajouter un média
-            </button>
-          </div>
-
-          <div class="comments-section">
-            <h3>Commentaires</h3>
-            <div v-for="(comment, index) in addForm.comments" :key="index" class="comment-form">
-              <div class="form-group">
-                <label :for="'comment' + index">Commentaire :</label>
-                <input type="text" v-model="comment.comment" :id="'comment' + index" required />
-              </div>
-
-              <div class="form-group">
-                <label :for="'author' + index">Auteur du commentaire :</label>
-                <input type="text" v-model="comment.author" :id="'author' + index" required />
-              </div>
-
-              <button type="button" class="btn delete small" @click="deleteComment(index)">
-                Supprimer le commentaire
-              </button>
-            </div>
-            <button type="button" class="btn add-comment" @click="addComment">
-              + Ajouter un commentaire
-            </button>
-          </div>
-
-          <div class="form-actions">
-            <button type="submit" class="btn submit">Enregistrer</button>
-            <button type="button" class="btn cancel" @click="cancelAdd">Annuler</button>
-          </div>
-        </form>
+<!-- Formulaire d'ajout -->
+<div v-if="isAdding" class="modal">
+  <div class="modal-content">
+    <h2>Ajouter un nouveau document</h2>
+    <form @submit.prevent="addDocument" class="form">
+      <div class="form-group">
+        <label for="add_post_name">Nom du post :</label>
+        <input type="text" v-model="addForm.post_name" id="add_post_name" required />
       </div>
-    </div>
+
+      <div class="form-group">
+        <label for="add_post_content">Contenu du post :</label>
+        <textarea v-model="addForm.post_content" id="add_post_content" required></textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="add_author">Auteur :</label>
+        <input type="text" v-model="addForm.attributes.author" id="add_author" required />
+      </div>
+
+      <!-- Section média du formulaire d'ajout -->
+      <div class="media-section">
+        <h3>Médias</h3>
+        <div v-for="(media, index) in addForm.media" :key="index" class="media-form">
+          <div class="form-group">
+            <label :for="'add_media_file' + index">Image :</label>
+            <input 
+              type="file" 
+              :id="'add_media_file' + index" 
+              accept="image/jpeg,image/png"
+              @change="(event) => handleImageUpload(event, index, 'add')"
+              class="file-input"
+            />
+          </div>
+          
+          <!-- Prévisualisation de l'image -->
+          <div v-if="media.url" class="image-preview">
+            <img :src="media.url" alt="Preview" class="preview-img" />
+          </div>
+
+          <button type="button" class="btn delete small" @click="deleteMedia(index)">
+            Supprimer le média
+          </button>
+        </div>
+        <button type="button" class="btn add-media" @click="addMedia">
+          + Ajouter une image
+        </button>
+      </div>
+
+      <div class="comments-section">
+        <h3>Commentaires</h3>
+        <div v-for="(comment, index) in addForm.comments" :key="index" class="comment-form">
+          <div class="form-group">
+            <label :for="'comment' + index">Commentaire :</label>
+            <input type="text" v-model="comment.comment" :id="'comment' + index" required />
+          </div>
+
+          <div class="form-group">
+            <label :for="'author' + index">Auteur du commentaire :</label>
+            <input type="text" v-model="comment.author" :id="'author' + index" required />
+          </div>
+
+          <button type="button" class="btn delete small" @click="deleteComment(index)">
+            Supprimer le commentaire
+          </button>
+        </div>
+        <button type="button" class="btn add-comment" @click="addComment">
+          + Ajouter un commentaire
+        </button>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn submit">Enregistrer</button>
+        <button type="button" class="btn cancel" @click="cancelAdd">Annuler</button>
+      </div>
+    </form>
+  </div>
+</div>
   </div>
     <!-- Formulaire de modification -->
   <div v-if="isEditing" class="modal">
@@ -941,6 +1022,31 @@ export default {
 /* Utilitaires */
 .ucfirst {
   text-transform: capitalize;
+}
+
+.media-section {
+  margin: 1rem 0;
+}
+
+.media-item {
+  margin: 0.5rem 0;
+}
+
+.post-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.image-preview {
+  margin: 1rem 0;
+}
+
+.preview-img {
+  max-width: 200px;
+  height: auto;
+  border-radius: 4px;
 }
 
 /* Media queries pour la responsivité */
